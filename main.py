@@ -1,44 +1,75 @@
-"""LaunchDarkly SDK setup: init, flag evaluation, and track for connectivity validation."""
+"""FastAPI recommendation engine with LaunchDarkly integration."""
 
-import os
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from dotenv import load_dotenv
+from ld_client import get_client, get_context, track
+from mock_data import PRODUCTS, USERS, get_product, get_user
+from recommender import alphabetical, by_rating, by_recency
 
-load_dotenv()
-import ldclient
-from ldclient import Context
-from ldclient.config import Config
-
-
-def main() -> None:
-    sdk_key = os.getenv("LAUNCHDARKLY_SDK_KEY")
-    if not sdk_key:
-        raise ValueError(
-            "LAUNCHDARKLY_SDK_KEY environment variable is required. "
-            "Set it in .env or export it before running."
-        )
-
-    ldclient.set_config(Config(sdk_key))
-    client = ldclient.get()
-
-    try:
-        if not client.is_initialized():
-            print("Waiting for SDK to initialize...")
-            client.wait_for_initialization(timeout=10)
-
-        context = Context.builder("sdk-validation-context").name("SDK Validation").build()
-
-        # Flag evaluation to confirm connectivity
-        flag_value = client.variation("example-flag-key", context, False)
-        print(f"Flag 'example-flag-key' value: {flag_value}")
-
-        # Track custom event to validate connectivity
-        client.track("sdk-connectivity-check", context, {"source": "cursor"})
-        print("Track event 'sdk-connectivity-check' sent with data: {source: 'cursor'}")
-
-    finally:
-        ldclient.close()
+app = FastAPI(title="Recommendation Engine")
 
 
-if __name__ == "__main__":
-    main()
+class ClickBody(BaseModel):
+    user_id: str
+    product_id: str
+
+
+@app.get("/recommendations")
+def get_recommendations(user_id: str = Query(..., alias="user_id")):
+    """Return ranked products based on LD flags. 404 if user not found."""
+    user = get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    context = get_context(user_id, user["tier"], user["name"])
+    client = get_client()
+
+    premium = client.variation("premium-recommendations", context, False)
+
+    if not premium:
+        products = alphabetical(PRODUCTS)
+        algorithm = "alphabetical"
+    else:
+        ranking = client.variation("recommendation-ranking-experiment", context, "rating")
+        print(f"User {user_id} got ranking: {ranking}")
+        print(f"User {user_id} got ranking: '{ranking}' == 'recency': {ranking == 'recency'}")
+        if ranking == "recency":
+            products = by_recency(PRODUCTS)
+            algorithm = "recency"
+        else:
+            products = by_rating(PRODUCTS)
+            algorithm = "rating"
+
+    return {"products": products, "algorithm": algorithm}
+
+
+@app.post("/click")
+def post_click(body: ClickBody):
+    """Track recommendation click event."""
+    user = get_user(body.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not get_product(body.product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    context = get_context(body.user_id, user["tier"],user["name"])
+    track("recommendation_clicked", context, {"product_id": body.product_id})
+    return {"ok": True}
+
+
+@app.get("/users")
+def get_users():
+    """Return list of mock users."""
+    return USERS
+
+
+@app.get("/")
+def root():
+    """Serve the static app."""
+    return FileResponse("static/index.html")
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
