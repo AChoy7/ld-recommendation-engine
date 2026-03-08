@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recommendation Engine</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 2rem; }
+    label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+    select { padding: 0.5rem; min-width: 200px; margin-bottom: 1.5rem; }
+    .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; margin-bottom: 1rem; background: #e5e7eb; color: #374151; }
+    .cards { display: flex; flex-direction: column; gap: 1rem; }
+    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; }
+    .card h3 { margin: 0 0 0.5rem; }
+    .card p { margin: 0.25rem 0; color: #6b7280; font-size: 0.9rem; }
+    .card button { margin-top: 0.5rem; padding: 0.4rem 0.8rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Recommendations</h1>
+  <label for="user">User</label>
+  <select id="user">
+    <option value="">Select a user</option>
+  </select>
+  <div id="badge" class="badge" style="display: none;"></div>
+  <div id="cards" class="cards"></div>
+
+  <script>
+    const userEl = document.getElementById('user');
+    const badgeEl = document.getElementById('badge');
+    const cardsEl = document.getElementById('cards');
+
+    async function loadUsers() {
+      const res = await fetch('/users');
+      const users = await res.json();
+      userEl.innerHTML = '<option value="">Select a user</option>' +
+        users.map(u => `<option value="${u.id}">${u.name} (${u.tier})</option>`).join('');
+    }
+
+    async function loadRecommendations(userId) {
+      const res = await fetch(`/recommendations?user_id=${encodeURIComponent(userId)}`);
+      if (!res.ok) return;
+      const { products, algorithm } = await res.json();
+      badgeEl.textContent = algorithm;
+      badgeEl.style.display = 'inline-block';
+      cardsEl.innerHTML = products.map(p => `
+        <div class="card">
+          <h3>${p.name}</h3>
+          <p>$${p.price.toFixed(2)} · ${p.rating}★ · ${p.created_at.slice(0, 10)}</p>
+          <button data-user="${userId}" data-product="${p.id}">View Product</button>
+        </div>
+      `).join('');
+      cardsEl.querySelectorAll('button').forEach(btn => {
+        btn.onclick = () => trackClick(btn.dataset.user, btn.dataset.product);
+      });
+    }
+
+    async function trackClick(userId, productId) {
+      await fetch('/click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, product_id: productId })
+      });
+    }
+
+    userEl.onchange = () => {
+      const id = userEl.value;
+      if (id) loadRecommendations(id);
+      else {
+        badgeEl.style.display = 'none';
+        cardsEl.innerHTML = '';
+      }
+    };
+
+    loadUsers();
+  </script>
+</body>
+</html>

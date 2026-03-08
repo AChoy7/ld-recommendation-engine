@@ -55,7 +55,7 @@ def post_click(body: ClickBody):
     if not get_product(body.product_id):
         raise HTTPException(status_code=404, detail="Product not found")
 
-    context = get_context(body.user_id, user["tier"],user["name"])
+    context = get_context(body.user_id, user["tier"], user["name"])
     track("recommendation_clicked", context, {"product_id": body.product_id})
     return {"ok": True}
 
