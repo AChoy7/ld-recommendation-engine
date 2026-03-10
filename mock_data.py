@@ -43,6 +43,10 @@ USERS = [
     {"id": "bob", "name": "Bob", "tier": "premium"},
     {"id": "carol", "name": "Carol", "tier": "premium"},
     {"id": "dave", "name": "Dave", "tier": "free"},
+    {"id": "eve", "name": "Eve", "tier": "premium"},
+    {"id": "frank", "name": "Frank", "tier": "premium"},
+    {"id": "grace", "name": "Grace", "tier": "premium"},
+    {"id": "henry", "name": "Henry", "tier": "free"},
 ]
 
 
