@@ -8,28 +8,123 @@
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 2rem; }
     label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
-    select { padding: 0.5rem; min-width: 200px; margin-bottom: 1.5rem; }
-    .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; margin-bottom: 1rem; background: #e5e7eb; color: #374151; }
+    select { padding: 0.5rem; min-width: 200px; margin-bottom: 1rem; }
+
+    /* Algorithm badge - color coded */
+    .badge {
+      display: inline-block;
+      vertical-align: middle;
+      padding: 0.2rem 0.55rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      line-height: 1.2;
+    }
+    .badge.recency      { background: #dbeafe; color: #1d4ed8; }
+    .badge.rating       { background: #dcfce7; color: #15803d; }
+    .badge.alphabetical { background: #f3f4f6; color: #4b5563; }
+
+    /* User info bar */
+    .user-info {
+      display: none;
+      align-items: center;
+      gap: 1.5rem;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 0.625rem 1rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.82rem;
+    }
+    .user-info.visible { display: flex; }
+    .user-info .info-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .info-label { color: #6b7280; }
+    .info-value { font-weight: 600; }
+
+    /* Cards */
     .cards { display: flex; flex-direction: column; gap: 1rem; }
-    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; }
+    .card {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 1rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
     .card h3 { margin: 0 0 0.5rem; }
     .card p { margin: 0.25rem 0; color: #6b7280; font-size: 0.9rem; }
     .card button { margin-top: 0.5rem; padding: 0.4rem 0.8rem; cursor: pointer; }
+
+    /* Green flash on click */
+    .card.clicked {
+      border-color: #16a34a;
+      box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+    }
+
+    /* Toast */
+    .toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .toast {
+      background: #1a1916;
+      color: #f8f7f4;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      animation: slideIn 0.2s ease, fadeOut 0.3s ease 2.2s forwards;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(1rem); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; }
+      to   { opacity: 0; }
+    }
   </style>
 </head>
 <body>
   <h1>Recommendations</h1>
+
   <label for="user">User</label>
   <select id="user">
     <option value="">Select a user</option>
   </select>
-  <div id="badge" class="badge" style="display: none;"></div>
+
+  <!-- User info bar -->
+  <div class="user-info" id="userInfo">
+    <span class="info-item"><span class="info-label">Tier</span><span class="info-value" id="infoTier"></span></span>
+    <span class="info-item"><span class="info-label">Algorithm</span><span id="infoBadge"></span></span>
+    <span class="info-item"><span class="info-label">Experiment</span><span class="info-value" id="infoExperiment"></span></span>
+  </div>
+
   <div id="cards" class="cards"></div>
+  <div class="toast-container" id="toastContainer"></div>
 
   <script>
-    const userEl = document.getElementById('user');
-    const badgeEl = document.getElementById('badge');
-    const cardsEl = document.getElementById('cards');
+    const userEl         = document.getElementById('user');
+    const cardsEl        = document.getElementById('cards');
+    const userInfoEl     = document.getElementById('userInfo');
+    const infoTierEl     = document.getElementById('infoTier');
+    const infoBadgeEl    = document.getElementById('infoBadge');
+    const infoExpEl      = document.getElementById('infoExperiment');
+    const toastContainer = document.getElementById('toastContainer');
+
+    // Maps algorithm value → badge CSS class and experiment label
+    const ALGO_CONFIG = {
+      recency:      { cls: 'recency',      experiment: 'Treatment (recency)' },
+      rating:       { cls: 'rating',       experiment: 'Control (rating)' },
+      alphabetical: { cls: 'alphabetical', experiment: 'N/A — free tier' },
+    };
+
+    function showToast(productName) {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = `✅ Click tracked to LaunchDarkly — ${productName}`;
+      toastContainer.appendChild(toast);
+      setTimeout(() => toast.remove(), 2600);
+    }
 
     async function loadUsers() {
       const res = await fetch('/users');
@@ -38,25 +133,42 @@
         users.map(u => `<option value="${u.id}">${u.name} (${u.tier})</option>`).join('');
     }
 
-    async function loadRecommendations(userId) {
+    async function loadRecommendations(userId, tier) {
       const res = await fetch(`/recommendations?user_id=${encodeURIComponent(userId)}`);
       if (!res.ok) return;
       const { products, algorithm } = await res.json();
-      badgeEl.textContent = algorithm;
-      badgeEl.style.display = 'inline-block';
+
+      // Update user info bar
+      const cfg = ALGO_CONFIG[algorithm] || ALGO_CONFIG.alphabetical;
+      infoTierEl.textContent = tier.charAt(0).toUpperCase() + tier.slice(1);
+      infoBadgeEl.innerHTML = `<span class="badge ${cfg.cls}">${algorithm}</span>`;
+      infoExpEl.textContent = cfg.experiment;
+      userInfoEl.classList.add('visible');
+
+      // Render product cards
       cardsEl.innerHTML = products.map(p => `
-        <div class="card">
+        <div class="card" id="card-${p.id}">
           <h3>${p.name}</h3>
           <p>$${p.price.toFixed(2)} · ${p.rating}★ · ${p.created_at.slice(0, 10)}</p>
-          <button data-user="${userId}" data-product="${p.id}">View Product</button>
+          <button data-user="${userId}" data-product="${p.id}" data-name="${p.name}">View Product</button>
         </div>
       `).join('');
+
       cardsEl.querySelectorAll('button').forEach(btn => {
-        btn.onclick = () => trackClick(btn.dataset.user, btn.dataset.product);
+        btn.onclick = () => trackClick(btn.dataset.user, btn.dataset.product, btn.dataset.name);
       });
     }
 
-    async function trackClick(userId, productId) {
+    async function trackClick(userId, productId, productName) {
+      // Flash card green
+      const card = document.getElementById(`card-${productId}`);
+      if (card) {
+        card.classList.add('clicked');
+        setTimeout(() => card.classList.remove('clicked'), 800);
+      }
+      // Show toast
+      showToast(productName);
+      // Fire to backend → LaunchDarkly
       await fetch('/click', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -66,9 +178,14 @@
 
     userEl.onchange = () => {
       const id = userEl.value;
-      if (id) loadRecommendations(id);
-      else {
-        badgeEl.style.display = 'none';
+      const selectedText = userEl.options[userEl.selectedIndex].text; // e.g. "Bob (premium)"
+      const tierMatch = selectedText.match(/\((\w+)\)/);              // extract "premium"
+      const tier = tierMatch ? tierMatch[1] : 'free';
+
+      if (id) {
+        loadRecommendations(id, tier);
+      } else {
+        userInfoEl.classList.remove('visible');
         cardsEl.innerHTML = '';
       }
     };
