@@ -34,6 +34,7 @@ def get_recommendations(user_id: str = Query(..., alias="user_id")):
         algorithm = "alphabetical"
     else:
         ranking = client.variation("recommendation-ranking-experiment", context, "rating")
+        client.flush()
         print(f"User {user_id} got ranking: {ranking}")
         print(f"User {user_id} got ranking: '{ranking}' == 'recency': {ranking == 'recency'}")
         if ranking == "recency":
